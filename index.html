@@ -129,6 +129,20 @@
   .has-bg #loginModal .glass{ background:rgba(10,8,30,.62); }
   .has-bg #loginModal{ background:transparent; -webkit-backdrop-filter:none; backdrop-filter:none; }
 
+  /* ===== GİRİŞ EKRANI: KAYITLI KİŞİLER MENÜSÜ (sağ taraf) ===== */
+  #loginModal{ gap:1.25rem; }
+  #loginModal > .modal-box{ flex:0 1 28rem; width:auto; min-width:0; }
+  #loginUsersMenu{ flex:0 0 19rem; width:19rem; max-height:90vh; display:flex; flex-direction:column; overflow:hidden; }
+  #loginUsersList{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:.5rem; }
+  .lu-row{ display:flex; align-items:center; gap:.75rem; padding:.55rem .7rem; }
+  .lu-av{ width:2.75rem; height:3.4rem; border-radius:.6rem; overflow:hidden; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:1.2rem; background:linear-gradient(135deg,var(--purple),var(--pink)); }
+  @media (max-width:860px){
+    #loginModal.open{ flex-direction:column; justify-content:flex-start; overflow-y:auto; }
+    #loginModal > .modal-box{ flex:0 0 auto; width:100%; max-width:28rem; max-height:none; margin-top:auto; }
+    #loginUsersMenu{ flex:0 0 auto; width:100%; max-width:28rem; max-height:none; margin-bottom:auto; }
+    #loginUsersList{ max-height:18rem; }
+  }
+
   /* ===== A4 DERS PROGRAMI KAĞIDI ===== */
   #printHost{ display:none; }
   .ps{
@@ -195,6 +209,15 @@
       <p class="text-[10px] text-indigo-200/40 text-center mt-3">Giriş yaptığında cihaz türü ve giriş zamanı bu tarayıcıda kayıt altına alınır.</p>
     </form>
   </div>
+  <!-- Kayıtlı kişiler menüsü: admin panelindeki kullanıcı listesi, salt okunur -->
+  <aside id="loginUsersMenu" class="glass p-5">
+    <div class="flex items-center justify-between mb-1">
+      <h3 class="text-base font-extrabold neon-title">👥 Kayıtlı Kişiler</h3>
+      <span id="loginUsersCount" class="text-xs text-indigo-200/60"></span>
+    </div>
+    <p class="text-[11px] text-indigo-200/50 mb-3">Profilleri yalnızca görüntüleyebilirsin; değişiklik yapılamaz.</p>
+    <div id="loginUsersList"></div>
+  </aside>
 </div>
 
 <!-- ============ ONAY MODALI ============ -->
@@ -259,6 +282,16 @@
     <div id="avatarBig"></div>
     <div id="avatarBigName" class="mt-4 text-xl font-extrabold neon-title"></div>
     <div class="text-xs text-indigo-200/60 mt-1">Kapatmak için dokun</div>
+  </div>
+</div>
+<!-- ============ KİŞİ PROFİLİ (SADECE GÖRÜNTÜLEME) ============ -->
+<div id="profileModal" class="modal-back" style="z-index:76">
+  <div class="glass modal-box p-6 max-w-sm text-center">
+    <div id="profPhoto" class="mx-auto mb-4"></div>
+    <h3 id="profName" class="text-2xl font-extrabold neon-title"></h3>
+    <p class="text-[11px] text-indigo-200/50 mt-1">Salt okunur profil</p>
+    <div id="profStats" class="grid grid-cols-2 gap-3 mt-5 text-left"></div>
+    <button data-act="closeProfile" class="btn btn-ghost w-full mt-5">Kapat</button>
   </div>
 </div>
 <div id="printHost"></div>
@@ -1043,6 +1076,7 @@ async function cloudFetch(force){
     settings = loadSettings();
     applyTheme();
     if(userName && storageKey) renderAvatar();
+    if($('loginModal').classList.contains('open')) renderLoginMenu();
     if(!$('adminPanel').classList.contains('hidden')){ renderAdmin(); }
     if($('printModal').classList.contains('open')) renderPreview();
   }catch(e){ console.warn('Bulut okunamadı', e); }
@@ -1578,6 +1612,92 @@ async function adminAction(act, el){
   }
 }
 
+/* ================= GİRİŞ EKRANI: KAYITLI KİŞİLER MENÜSÜ (SALT OKUNUR) ================= */
+function prettyName(n){
+  return String(n).split(' ').map(w => w ? w.charAt(0).toLocaleUpperCase('tr-TR') + w.slice(1) : w).join(' ');
+}
+function renderLoginMenu(){
+  const box = $('loginUsersList'), cnt = $('loginUsersCount');
+  if(!box || !cnt) return;
+  const list = usersList();
+  cnt.textContent = list.length ? list.length + ' kişi' : '';
+  if(!list.length){
+    box.innerHTML = '<div class="text-center text-sm text-indigo-200/50 py-6">Henüz kayıtlı kişi yok.</div>';
+    return;
+  }
+  box.innerHTML = list.map(u => {
+    const nm = u.cloudOnly ? prettyName(u.name) : u.name;
+    const p = settings.photos[u.key];
+    return `
+    <div class="glass-sm lu-row">
+      <div class="lu-av">${p ? '<img src="' + p + '" alt="" style="width:100%;height:100%;object-fit:cover">' : esc(nm.charAt(0).toLocaleUpperCase('tr-TR'))}</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-bold truncate">${esc(nm)}</div>
+        <button type="button" data-act="viewProfile" data-key="${esc(u.key)}" class="chip mt-1">👁 Profili Görüntüle</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function loginLoadCloudUsers(){
+  if(!cloudOn()) return;
+  try{
+    const docs = await fsList('users', 'key');
+    cloudUserKeys = docs.map(d => fsStr(d.fields && d.fields.key)).filter(k => k && k.indexOf(PREFIX) === 0);
+    if($('loginModal').classList.contains('open')) renderLoginMenu();
+  }catch(e){ console.warn('Kişi listesi alınamadı', e); }
+}
+
+let profReq = 0;
+function profSummary(d){
+  const s = sumQ(d.questions);
+  let c = s.c, w = s.w, b = s.b, net = s.net, sec = d.seconds || 0;
+  d.history.forEach(h => {
+    const hs = sumQ(h.questions || []);
+    c += hs.c; w += hs.w; b += hs.b; net += hs.net; sec += h.seconds || 0;
+  });
+  return { days: d.history.length, sec: sec, solved: c + w + b, c: c, w: w, b: b, net: net };
+}
+function statCard(label, val){
+  return '<div class="glass-sm p-3"><div class="text-[11px] uppercase tracking-wider text-cyan-300/80">' + label + '</div><div class="text-lg font-bold">' + esc(val) + '</div></div>';
+}
+function renderProfile(key, name, sum){
+  const p = settings.photos[key];
+  $('profPhoto').innerHTML = p
+    ? '<img src="' + p + '" alt="" style="display:block;margin:0 auto;max-width:80vw;max-height:42vh;width:auto;height:auto;object-fit:contain;border-radius:1.25rem;border:2px solid rgba(255,255,255,.25);box-shadow:0 0 44px rgba(168,85,247,.55)">'
+    : '<div style="width:140px;height:140px;margin:0 auto;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:56px;font-weight:800;background:linear-gradient(135deg,var(--purple),var(--pink));box-shadow:0 0 44px rgba(236,72,153,.55)">' + esc(name.charAt(0).toLocaleUpperCase('tr-TR')) + '</div>';
+  $('profName').textContent = name;
+  $('profStats').innerHTML = sum
+    ? statCard('Çalışma süresi', fmtHM(sum.sec)) + statCard('Arşivlenen gün', sum.days + ' gün')
+      + statCard('Çözülen soru', String(sum.solved)) + statCard('Toplam net', fmtNet(sum.net))
+      + '<div class="col-span-2 text-center text-xs text-indigo-200/70">Doğru <b class="text-emerald-300">' + sum.c + '</b> · Yanlış <b class="text-pink-300">' + sum.w + '</b> · Boş <b class="text-purple-300">' + sum.b + '</b></div>'
+    : '<div class="col-span-2 text-center text-sm text-indigo-200/60 py-4">Yükleniyor…</div>';
+}
+async function viewProfile(key){
+  const req = ++profReq;
+  const u = usersList().find(x => x.key === key);
+  let name = u ? (u.cloudOnly ? prettyName(u.name) : u.name) : prettyName(key.slice(PREFIX.length));
+  let d = null;
+  try{ const raw = JSON.parse(localStorage.getItem(key)); if(raw) d = cleanData(raw, name); }catch(e){}
+  if(d) name = d.displayName || name;
+  renderProfile(key, name, d ? profSummary(d) : null);
+  $('profileModal').classList.add('open');
+  if(cloudOn()){
+    try{
+      const rem = await fetchUserDoc(key);
+      if(req !== profReq) return;
+      if(rem && rem.obj){
+        const r = cleanData(rem.obj, name);
+        const meta = metaGet(key);
+        d = (d && hasContent(d) && (meta.dirty || !meta.syncedRev)) ? mergeData(d, r) : r;
+        name = d.displayName || name;
+      }
+    }catch(e){ console.warn('Profil okunamadı', e); }
+  }
+  if(req !== profReq) return;
+  renderProfile(key, name, profSummary(d || defaultData(name)));
+}
+function closeProfile(){ profReq++; $('profileModal').classList.remove('open'); }
+
 /* ================= GİRİŞ ================= */
 function showLogin(){
   const names = knownUsers();
@@ -1599,6 +1719,8 @@ function showLogin(){
   $('app').classList.add('hidden');
   $('adminPanel').classList.add('hidden');
   $('loginModal').classList.add('open');
+  renderLoginMenu();
+  loginLoadCloudUsers();
   setTimeout(() => $('loginName').focus(), 50);
 }
 
@@ -2058,6 +2180,10 @@ document.addEventListener('click', e => {
     pickPhoto(url => { if(setPhoto(storageKey, url)){ renderPreview(); renderAvatar(); toast('📷 Foto eklendi'); } });
   } else if(act === 'rmPhotoSheet'){
     removePhoto(storageKey); renderPreview(); renderAvatar();
+  } else if(act === 'viewProfile'){
+    viewProfile(el.dataset.key);
+  } else if(act === 'closeProfile'){
+    closeProfile();
   } else if(act.indexOf('admin') === 0){
     adminAction(act, el);
   } else if(act === 'openAvatar'){
@@ -2113,6 +2239,8 @@ document.addEventListener('keydown', e => { if(e.key === 'Escape' && $('recModal
 $('optLines').addEventListener('change', renderPreview);
 $('optDone').addEventListener('change', renderPreview);
 $('printModal').addEventListener('click', e => { if(e.target === $('printModal')) closePrint(); });
+$('profileModal').addEventListener('click', e => { if(e.target === $('profileModal')) closeProfile(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && $('profileModal').classList.contains('open')) closeProfile(); });
 window.addEventListener('resize', () => { if($('printModal').classList.contains('open')) fitPreview(); });
 window.addEventListener('afterprint', () => { $('printHost').innerHTML = ''; });
 document.addEventListener('keydown', e => { if(e.key === 'Escape' && $('printModal').classList.contains('open')) closePrint(); });
