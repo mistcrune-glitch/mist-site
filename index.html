@@ -143,6 +143,19 @@
     #loginUsersList{ max-height:18rem; }
   }
 
+  /* ===== İZLEME MODU (salt okunur profil) ===== */
+  body.view-only .weekly-input,
+  body.view-only [data-act="addTask"],
+  body.view-only [data-act="delTask"],
+  body.view-only [data-act="delQ"],
+  body.view-only #btnUncheckWeek,
+  body.view-only #detailDelete,
+  body.view-only .btn[data-act="pickPhotoSheet"],
+  body.view-only .ps-ph{ display:none !important; }
+  body.view-only #btnRmPhoto{ display:none !important; }
+  body.view-only [data-act="toggleTask"]{ pointer-events:none; }
+  body.view-only .ps-photo{ pointer-events:none; cursor:default; }
+
   /* ===== A4 DERS PROGRAMI KAĞIDI ===== */
   #printHost{ display:none; }
   .ps{
@@ -282,16 +295,6 @@
     <div id="avatarBig"></div>
     <div id="avatarBigName" class="mt-4 text-xl font-extrabold neon-title"></div>
     <div class="text-xs text-indigo-200/60 mt-1">Kapatmak için dokun</div>
-  </div>
-</div>
-<!-- ============ KİŞİ PROFİLİ (SADECE GÖRÜNTÜLEME) ============ -->
-<div id="profileModal" class="modal-back" style="z-index:76">
-  <div class="glass modal-box p-6 max-w-sm text-center">
-    <div id="profPhoto" class="mx-auto mb-4"></div>
-    <h3 id="profName" class="text-2xl font-extrabold neon-title"></h3>
-    <p class="text-[11px] text-indigo-200/50 mt-1">Salt okunur profil</p>
-    <div id="profStats" class="grid grid-cols-2 gap-3 mt-5 text-left"></div>
-    <button data-act="closeProfile" class="btn btn-ghost w-full mt-5">Kapat</button>
   </div>
 </div>
 <div id="printHost"></div>
@@ -443,6 +446,9 @@
 <!-- ============ ANA UYGULAMA ============ -->
 <main id="app" class="max-w-7xl mx-auto px-4 py-6 md:py-8 hidden">
 
+  <!-- İzleme modu şeridi -->
+  <div id="viewBanner" class="hidden glass px-4 py-2 mb-4 text-sm text-center" style="border-color:rgba(34,211,238,.5)">👁 <b>İzleme modu</b> · <b id="viewBannerName"></b> profilini görüntülüyorsun. Hiçbir şeyi değiştiremezsin.</div>
+
   <!-- Üst bar -->
   <header class="flex flex-wrap items-center justify-between gap-4 mb-6">
     <div>
@@ -455,7 +461,7 @@
         <div class="text-xs text-indigo-200/60">Aktif kullanıcı <span id="syncState"></span></div>
         <div id="userName" class="font-bold"></div>
       </div>
-      <button data-act="switchUser" class="btn btn-ghost !py-1 !px-3 text-sm ml-2">Kullanıcı Değiştir</button>
+      <button id="btnSwitch" data-act="switchUser" class="btn btn-ghost !py-1 !px-3 text-sm ml-2">Kullanıcı Değiştir</button>
     </div>
   </header>
 
@@ -633,6 +639,7 @@ const LAST_KEY = 'studyTracker_lastUser';
 
 /* ================= DURUM ================= */
 let userName = null, storageKey = null, data = null;
+let viewOnly = false, viewReq = 0;
 let running = false, tickHandle = null, lastTick = 0;
 let scope = 'today', chart = null;
 
@@ -703,7 +710,7 @@ function loadData(name){
   return base;
 }
 function save(noSync){
-  if(!storageKey || !data) return;
+  if(viewOnly || !storageKey || !data) return;
   try{ localStorage.setItem(storageKey, JSON.stringify(data)); }
   catch(e){ toast('⚠ Veri kaydedilemedi (tarayıcı depolama dolu/engelli olabilir).'); }
   if(!noSync && cloudOn()){
@@ -1222,7 +1229,7 @@ async function fetchUserDoc(key){
 }
 
 async function userSyncPull(){
-  if(!cloudOn() || !storageKey || !data) return;
+  if(viewOnly || !cloudOn() || !storageKey || !data) return;
   const key = storageKey;
   lastUserPull = Date.now();
   setSync('· ☁ eşitleniyor…');
@@ -1262,7 +1269,7 @@ async function userSyncPull(){
 }
 
 function scheduleUserPush(delay){
-  if(!cloudOn() || syncTimer) return;
+  if(viewOnly || !cloudOn() || syncTimer) return;
   syncTimer = setTimeout(() => { syncTimer = null; userPush(); }, delay || 8000);
 }
 async function pushUser(key, obj, keepalive){
@@ -1278,7 +1285,7 @@ async function pushUser(key, obj, keepalive){
   return true;
 }
 async function userPush(keepalive){
-  if(!cloudOn() || !storageKey || !data || pushing) return;
+  if(viewOnly || !cloudOn() || !storageKey || !data || pushing) return;
   if(syncTimer){ clearTimeout(syncTimer); syncTimer = null; }
   const key = storageKey, obj = data;
   if(keepalive && JSON.stringify(obj).length > 60000) return;
@@ -1612,7 +1619,7 @@ async function adminAction(act, el){
   }
 }
 
-/* ================= GİRİŞ EKRANI: KAYITLI KİŞİLER MENÜSÜ (SALT OKUNUR) ================= */
+/* ================= GİRİŞ EKRANI: KAYITLI KİŞİLER MENÜSÜ + İZLEME MODU ================= */
 function prettyName(n){
   return String(n).split(' ').map(w => w ? w.charAt(0).toLocaleUpperCase('tr-TR') + w.slice(1) : w).join(' ');
 }
@@ -1647,44 +1654,28 @@ async function loginLoadCloudUsers(){
   }catch(e){ console.warn('Kişi listesi alınamadı', e); }
 }
 
-let profReq = 0;
-function profSummary(d){
-  const s = sumQ(d.questions);
-  let c = s.c, w = s.w, b = s.b, net = s.net, sec = d.seconds || 0;
-  d.history.forEach(h => {
-    const hs = sumQ(h.questions || []);
-    c += hs.c; w += hs.w; b += hs.b; net += hs.net; sec += h.seconds || 0;
+/* İzleme modu: kişinin tüm paneli açılır, hiçbir yere yazılmaz */
+function setViewUI(on){
+  document.body.classList.toggle('view-only', on);
+  [$('timerRing'), $('btnEndDay')].forEach(el => {
+    const s = el && el.closest('section');
+    if(s) s.style.display = on ? 'none' : '';
   });
-  return { days: d.history.length, sec: sec, solved: c + w + b, c: c, w: w, b: b, net: net };
+  const bn = $('viewBanner'); if(bn) bn.classList.toggle('hidden', !on);
+  const sw = $('btnSwitch'); if(sw) sw.textContent = on ? '← Girişe Dön' : 'Kullanıcı Değiştir';
 }
-function statCard(label, val){
-  return '<div class="glass-sm p-3"><div class="text-[11px] uppercase tracking-wider text-cyan-300/80">' + label + '</div><div class="text-lg font-bold">' + esc(val) + '</div></div>';
-}
-function renderProfile(key, name, sum){
-  const p = settings.photos[key];
-  $('profPhoto').innerHTML = p
-    ? '<img src="' + p + '" alt="" style="display:block;margin:0 auto;max-width:80vw;max-height:42vh;width:auto;height:auto;object-fit:contain;border-radius:1.25rem;border:2px solid rgba(255,255,255,.25);box-shadow:0 0 44px rgba(168,85,247,.55)">'
-    : '<div style="width:140px;height:140px;margin:0 auto;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:56px;font-weight:800;background:linear-gradient(135deg,var(--purple),var(--pink));box-shadow:0 0 44px rgba(236,72,153,.55)">' + esc(name.charAt(0).toLocaleUpperCase('tr-TR')) + '</div>';
-  $('profName').textContent = name;
-  $('profStats').innerHTML = sum
-    ? statCard('Çalışma süresi', fmtHM(sum.sec)) + statCard('Arşivlenen gün', sum.days + ' gün')
-      + statCard('Çözülen soru', String(sum.solved)) + statCard('Toplam net', fmtNet(sum.net))
-      + '<div class="col-span-2 text-center text-xs text-indigo-200/70">Doğru <b class="text-emerald-300">' + sum.c + '</b> · Yanlış <b class="text-pink-300">' + sum.w + '</b> · Boş <b class="text-purple-300">' + sum.b + '</b></div>'
-    : '<div class="col-span-2 text-center text-sm text-indigo-200/60 py-4">Yükleniyor…</div>';
-}
-async function viewProfile(key){
-  const req = ++profReq;
+async function viewUser(key){
+  const req = ++viewReq;
   const u = usersList().find(x => x.key === key);
   let name = u ? (u.cloudOnly ? prettyName(u.name) : u.name) : prettyName(key.slice(PREFIX.length));
   let d = null;
   try{ const raw = JSON.parse(localStorage.getItem(key)); if(raw) d = cleanData(raw, name); }catch(e){}
   if(d) name = d.displayName || name;
-  renderProfile(key, name, d ? profSummary(d) : null);
-  $('profileModal').classList.add('open');
   if(cloudOn()){
+    toast('Profil yükleniyor…');
     try{
       const rem = await fetchUserDoc(key);
-      if(req !== profReq) return;
+      if(req !== viewReq) return;
       if(rem && rem.obj){
         const r = cleanData(rem.obj, name);
         const meta = metaGet(key);
@@ -1693,13 +1684,28 @@ async function viewProfile(key){
       }
     }catch(e){ console.warn('Profil okunamadı', e); }
   }
-  if(req !== profReq) return;
-  renderProfile(key, name, profSummary(d || defaultData(name)));
+  if(req !== viewReq) return;
+  if(!d) d = defaultData(name);
+  stopTimer();
+  viewOnly = true;
+  setViewUI(true);
+  userName = name; storageKey = key; data = d;
+  $('viewBannerName').textContent = name;
+  $('loginModal').classList.remove('open');
+  $('app').classList.remove('hidden');
+  $('userName').textContent = userName;
+  renderAvatar();
+  applyTheme();
+  scope = 'today';
+  document.querySelectorAll('.scope-btn').forEach(b => b.classList.toggle('active', b.dataset.scope === 'today'));
+  renderAll();
+  setSync('· 👁 izleme');
+  window.scrollTo(0, 0);
 }
-function closeProfile(){ profReq++; $('profileModal').classList.remove('open'); }
 
 /* ================= GİRİŞ ================= */
 function showLogin(){
+  if(viewOnly){ viewOnly = false; setViewUI(false); data = null; storageKey = null; userName = null; }
   const names = knownUsers();
   const wrap = $('knownUsersWrap'), box = $('knownUsers');
   box.innerHTML = '';
@@ -1728,6 +1734,7 @@ function login(name, bypass){
   name = name.trim().replace(/\s+/g,' ');
   if(!name) return;
   if(name.toLowerCase() === ADMIN_CODE){ openAdmin(); return; }
+  if(viewOnly){ viewOnly = false; setViewUI(false); }
   if(!bypass){
     if(isBlocked(name)){
       logAccess(name, true);
@@ -1770,7 +1777,7 @@ function tick(){
   }
 }
 function startTimer(){
-  if(running) return;
+  if(viewOnly || running) return;
   running = true; lastTick = Date.now();
   tickHandle = setInterval(tick, 250);
   renderTimer();
@@ -1827,6 +1834,7 @@ function updatePreview(){
 }
 function addQuestion(e){
   e.preventDefault();
+  if(viewOnly) return;
   const d = toInt($('qCorrect').value), y = toInt($('qWrong').value), b = toInt($('qBlank').value);
   if(d + y + b === 0){ toast('Doğru, yanlış veya boştan en az biri 0\'dan büyük olmalı.'); return; }
   data.questions.push({
@@ -1948,6 +1956,7 @@ function renderWeek(){
   $('weekProgress').textContent = total ? `Haftalık ilerleme: ${done}/${total} (%${Math.round(done/total*100)})` : 'Henüz görev eklenmedi';
 }
 function addTask(day){
+  if(viewOnly) return;
   const inp = $('wi-' + day);
   const text = inp.value.trim();
   if(!text) return;
@@ -2025,6 +2034,7 @@ function doPrint(){
 
 /* ================= GÜNÜ BİTİR & ARŞİV ================= */
 async function endDay(){
+  if(viewOnly) return;
   if(data.seconds === 0 && data.questions.length === 0){
     toast('Kaydedilecek bir veri yok.'); return;
   }
@@ -2132,6 +2142,7 @@ $('qForm').addEventListener('submit', addQuestion);
 $('btnStart').onclick = startTimer;
 $('btnStop').onclick = stopTimer;
 $('btnReset').onclick = async () => {
+  if(viewOnly) return;
   if(data.seconds === 0 && !running){ return; }
   const ok = await askConfirm('Kronometreyi sıfırla?', 'Bugünkü toplam çalışma süren 00:00:00\'a dönecek.', 'Sıfırla');
   if(!ok) return;
@@ -2139,11 +2150,12 @@ $('btnReset').onclick = async () => {
 };
 $('btnEndDay').onclick = endDay;
 $('btnUncheckWeek').onclick = () => {
+  if(viewOnly) return;
   data.weekly.forEach(day => day.forEach(t => t.done = false));
   save(); renderWeek(); toast('Tüm tikler temizlendi');
 };
 $('detailDelete').onclick = async () => {
-  if(!openDayId) return;
+  if(viewOnly || !openDayId) return;
   const id = openDayId;
   const ok = await askConfirm('Arşivden sil?', 'Bu güne ait tüm kayıtlar kalıcı olarak silinecek.', 'Sil');
   if(!ok) return;
@@ -2163,6 +2175,7 @@ document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
   if(!el) return;
   const act = el.dataset.act;
+  if(viewOnly && (act === 'delQ' || act === 'delTask' || act === 'addTask' || act === 'pickPhotoSheet' || act === 'rmPhotoSheet')) return;
   if(act === 'delQ'){
     data.questions = data.questions.filter(q => q.id !== el.dataset.id);
     save(); renderQuestions(); renderTotals(); renderChart();
@@ -2181,9 +2194,7 @@ document.addEventListener('click', e => {
   } else if(act === 'rmPhotoSheet'){
     removePhoto(storageKey); renderPreview(); renderAvatar();
   } else if(act === 'viewProfile'){
-    viewProfile(el.dataset.key);
-  } else if(act === 'closeProfile'){
-    closeProfile();
+    viewUser(el.dataset.key);
   } else if(act.indexOf('admin') === 0){
     adminAction(act, el);
   } else if(act === 'openAvatar'){
@@ -2200,7 +2211,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => {
   const el = e.target;
-  if(el.dataset && el.dataset.act === 'toggleTask'){
+  if(el.dataset && el.dataset.act === 'toggleTask' && !viewOnly){
     const d = Number(el.dataset.day);
     const t = data.weekly[d].find(x => x.id === el.dataset.id);
     if(t){ t.done = el.checked; save(); renderWeek(); }
@@ -2239,8 +2250,6 @@ document.addEventListener('keydown', e => { if(e.key === 'Escape' && $('recModal
 $('optLines').addEventListener('change', renderPreview);
 $('optDone').addEventListener('change', renderPreview);
 $('printModal').addEventListener('click', e => { if(e.target === $('printModal')) closePrint(); });
-$('profileModal').addEventListener('click', e => { if(e.target === $('profileModal')) closeProfile(); });
-document.addEventListener('keydown', e => { if(e.key === 'Escape' && $('profileModal').classList.contains('open')) closeProfile(); });
 window.addEventListener('resize', () => { if($('printModal').classList.contains('open')) fitPreview(); });
 window.addEventListener('afterprint', () => { $('printHost').innerHTML = ''; });
 document.addEventListener('keydown', e => { if(e.key === 'Escape' && $('printModal').classList.contains('open')) closePrint(); });
